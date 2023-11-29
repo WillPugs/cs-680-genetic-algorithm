@@ -17,7 +17,7 @@ class GeneticAlgorithm:
                             3: "Tournament Selection",
                             4: "Truncation"}
     
-    def __init__(self, X, Y, model, P, n_estimators, max_samples):
+    def __init__(self, X, Y, model, P, n_estimators=None, max_samples=None, cv=None):
         """ (self, np.array, np.array, sklearn_model) -> (GeneticAlgorithm)
         X: features
         Y: labels
@@ -26,9 +26,12 @@ class GeneticAlgorithm:
         self.Y = Y
         self.model = model
 
+        if (n_estimators is not None) and (max_samples is not None) and (cv is not None):
+            raise ValueError("Can only specify a genetic algorithm using either bagging or cross-validation, not both.")
         self.P = P
         self.n_estimators = n_estimators
         self.max_samples = max_samples
+        self.cv = cv
 
         self.n = X.shape[0] #number of data points
         self.d = X.shape[1] #number of features
@@ -74,10 +77,10 @@ class GeneticAlgorithm:
         
         #update other parameters
         fitnesses = []
-        biggest_value = self.fitness_bagging(population[0]) #initial guess for best fitness value in population
+        biggest_value = self.fitness(population[0]) #initial guess for best fitness value in population
         for individual in population:
             #update optimal values
-            fit_val = self.fitness_bagging(individual)
+            fit_val = self.fitness(individual)
             if fit_val > self.get_optimal_value(): #better than current best
                 self.set_optimal_solution(individual)
                 self.set_optimal_value(fit_val)
@@ -108,6 +111,8 @@ class GeneticAlgorithm:
         """ (self, np.array) -> (num)
         Performs cv-fold cross-validation.
         """
+        if self.cv is None: #do not use cross-validation
+            return self.fitness_bagging(solution)
         if np.sum(solution)==0: #no features
             return 0 #terrible score
         num_points = self.get_n()//self.get_cv()
@@ -432,19 +437,16 @@ class GeneticAlgorithm:
 
 
 if __name__ == '__main__':
-    test_methods = False
-    if test_methods:
-        pass
-
-
     test_alg = True
     if test_alg:
         from sklearn.datasets import make_classification
+        from sklearn.model_selection import train_test_split
         from sklearn.tree import DecisionTreeClassifier
 
-        x_testing, y_testing = make_classification(n_samples=200, n_features=5, n_classes=2)
+        X, y = make_classification(n_samples=200, n_features=10, n_redundant=5, n_classes=2)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=42)
 
-        test_GA = GeneticAlgorithm(x_testing, y_testing, DecisionTreeClassifier(), 10, 5)
+        test_GA = GeneticAlgorithm(X_train, y_train, DecisionTreeClassifier(), 10, n_estimators=5, max_samples=50)
         result = test_GA.run(100, 0.01, 2, 0, 3, None, 100, 1)
         print(f"Running time: {result.running_time} s")
         print(f"Optimal solution: {result.opt_sol}")
@@ -454,9 +456,9 @@ if __name__ == '__main__':
         
         model = DecisionTreeClassifier()
 
-        model.fit(x_testing[:,result.opt_sol.astype(bool)], y_testing)
-        print(f"Model trained on selected features: {model.score(x_testing[:,result.opt_sol.astype(bool)], y_testing)}")
+        model.fit(X_train[:,result.opt_sol.astype(bool)], y_train)
+        print(f"Model trained on selected features: {model.score(X_test[:,result.opt_sol.astype(bool)], y_test)}")
 
-        model.fit(x_testing, y_testing)
-        print(f"Model trained on all features: {model.score(x_testing, y_testing)}")
+        model.fit(X_train, y_train)
+        print(f"Model trained on all features: {model.score(X_test, y_test)}")
         #print(GeneticAlgorithm.algorithm_names[0])
