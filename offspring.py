@@ -21,7 +21,7 @@ class ChildSolution:
         self.father = father
 
         if crossover > mother.size:
-            raise AttributeError("The number of crossover points cannot be greater than the size of the parent arrays.")
+            raise AttributeError(f"The number of crossover points {crossover} cannot be greater than the size of the parent arrays: {mother.size}, {father.size}.")
         self.crossover = crossover
 
     #crossover algorithm
