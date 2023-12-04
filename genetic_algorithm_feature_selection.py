@@ -255,7 +255,7 @@ class GeneticAlgorithm:
             num_parents = num_children+1
         else:
             num_parents = num_children
-        return self.get_population()[:self.get_P()-num_parents,:]
+        return self.get_population()[self.get_P()-num_parents:,:]
     
     #create children
     def create_children_population(self, parents, num_children, crossover):
