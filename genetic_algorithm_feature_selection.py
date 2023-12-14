@@ -61,6 +61,8 @@ class GeneticAlgorithm:
         return self.d
     def get_P(self):
         return self.P
+    def get_cv(self):
+        return self.cv
 
     
     
@@ -115,7 +117,7 @@ class GeneticAlgorithm:
             return self.fitness_bagging(solution)
         if np.sum(solution)==0: #no features
             return 0 #terrible score
-        num_points = self.get_n()//self.get_cv()
+        num_points = self.get_n()//(self.get_cv())
         data_point_indices = np.arange(self.get_n())
         np.random.shuffle(data_point_indices)
 
@@ -129,7 +131,7 @@ class GeneticAlgorithm:
             #test
             scores += self.model.score(self.get_X()[fold_indices,:][:,solution.astype(bool)], self.get_Y()[fold_indices])
 
-        return scores/self.get_cv()
+        return scores/(self.get_cv())
 
     def fitness_bagging(self, solution):
         """ (self, np.array) -> (num)
