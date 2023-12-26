@@ -1,0 +1,450 @@
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import MultinomialNB
+
+from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
+from sklearn.preprocessing import normalize
+import scipy.stats as stats
+
+from keras.datasets import mnist, fashion_mnist, cifar10
+
+import numpy as np
+from genetic_algorithm_feature_selection import *
+import matplotlib.pyplot as plt
+
+
+load_minst = True
+if load_minst:
+    print(f"Using the MNIST Dataset")
+    (x_train, y_train), (x_test, y_test) = mnist.load_data()
+    #flatten
+    x_train = x_train.reshape(x_train.shape[0], x_train.shape[1]*x_train.shape[2])
+    x_test = x_test.reshape(x_test.shape[0], x_test.shape[1]*x_test.shape[2])
+
+load_fashion = False
+if load_fashion:
+    print("Using the MNIST Fashion Dataset")
+    (x_train, y_train), (x_test, y_test) = fashion_mnist.load_data()
+    #flatten
+    x_train = x_train.reshape(x_train.shape[0], x_train.shape[1]*x_train.shape[2])
+    x_test = x_test.reshape(x_test.shape[0], x_test.shape[1]*x_test.shape[2])
+
+load_cifar = False
+if load_cifar:
+    print("Using the CIFAR10 Dataset")
+    (x_train, y_train), (x_test, y_test) = cifar10.load_data()
+    #flatten
+    #x_train = x_train.reshape(x_train.shape[0], x_train.shape[1]*x_train.shape[2])
+    #x_test = x_test.reshape(x_test.shape[0], x_test.shape[1]*x_test.shape[2])
+
+
+n = x_train.shape[0]
+d = x_train.shape[1]
+
+P = 10
+iterations = 30
+lam = 0.05
+crossover = d
+selection = 2
+num_children = 4
+k = None
+replace_occurrence = 100
+replace_amount = 1
+
+n_estimators = None #80
+max_samples = None #1000
+cv = 5
+
+run_decision_tree = False
+if run_decision_tree:
+    print("\n### Decision trees ###")
+
+    model = DecisionTreeClassifier()
+
+    param_dist ={
+        "criterion": ["gini", "entropy", "log_loss"],
+        "splitter": ["best", "random"],
+        "max_depth": np.arange(20)+1
+    }
+    n_iter_search = 15
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train, y_train)
+    best_model = random_search.best_estimator_
+    best_model.fit(x_train, y_train)
+    #model.fit(x_train, y_train)
+
+    print(f"Hyperparameters for base classifier: {best_model.get_params()}")
+    predictions = best_model.predict(x_test)
+
+    #print(f"Train Score: {best_model.score(x_train, y_train)}")
+    print(f"Train Accuracy: {np.sum(best_model.predict(x_train)==y_train)/y_train.shape[0]}")
+    #print(f"Test Score: {best_model.score(x_test, y_test)}")
+    print(f"Test Accuracy: {np.sum(best_model.predict(x_test)==y_test)/y_test.shape[0]}")
+
+    
+    model_GA = DecisionTreeClassifier()
+    model_GA.set_params(**best_model.get_params())
+
+    GA_forest = GeneticAlgorithm(x_train, y_train, model_GA, P=P, n_estimators=n_estimators, max_samples=max_samples, cv=cv)
+    GA_result = GA_forest.run(iterations=iterations, mutation_rate=lam, crossover=crossover, 
+                              selection=selection, num_children=num_children, tournament_k=k, 
+                              replace_occurrence=replace_occurrence, replace_amount=replace_amount)
+
+    plt.figure()
+    plt.plot(GA_result.values, ls="-", marker="", label="Generation's Score")
+    plt.plot(GeneticAlgorithm.values_to_optimal_values(GA_result.values), ls="--", marker="", label="Best Score")
+    plt.title("GA Using Decision Tree Classifier")
+    plt.ylabel("Accuracy")
+    plt.xlabel("Generation")
+    plt.legend()
+    plt.show()
+    
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    best_model_GA = random_search.best_estimator_
+    best_model_GA.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    predictions = best_model_GA.predict(x_test[:,GA_result.opt_sol.astype(bool)])
+    print(f"It took the GA {GA_result.running_time} seconds to reach a solution")
+    print(f"Selected {np.sum(GA_result.opt_sol)}/{x_train.shape[1]} features")
+    print(f"Hyperparameters for reduced classifier: {best_model_GA.get_params()}")
+    #print(f"Model trained on selected features train score: {best_model_GA.score(x_train[:,GA_result.opt_sol.astype(bool)], y_train)}")
+    print(f"Model trained on selected features train accuracy: {np.sum(best_model_GA.predict(x_train[:,GA_result.opt_sol.astype(bool)])==y_train)/y_train.shape[0]}")
+    #print(f"Model trained on selected features test score: {best_model_GA.score(x_test[:,GA_result.opt_sol.astype(bool)], y_test)}")
+    print(f"Model trained on selected features test accuracy: {np.sum(predictions==y_test)/y_test.shape[0]}")
+    print(f"Got {np.sum(predictions==y_test)} right on test")
+    print(f"Got {y_test.shape[0] - np.sum(predictions==y_test)} wrong on test")
+    
+
+run_random_forest = False
+if run_random_forest:
+    print("\n### Random Forest ###")
+
+    model = RandomForestClassifier()
+    
+    param_dist ={
+        "n_estimators": np.arange(10, 100),
+        "criterion": ["gini", "entropy", "log_loss"],
+        "max_depth": np.arange(20)+1
+    }
+    n_iter_search = 15
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train, y_train)
+    best_model = random_search.best_estimator_
+    best_model.fit(x_train, y_train)
+
+    print(f"Hyperparameters for base classifier: {best_model.get_params()}")
+    predictions = best_model.predict(x_test)
+
+    #print(f"Train Score: {best_model.score(x_train, y_train)}")
+    print(f"Train Accuracy: {np.sum(best_model.predict(x_train)==y_train)/y_train.shape[0]}")
+    #print(f"Test Score: {best_model.score(x_test, y_test)}")
+    print(f"Test Accuracy: {np.sum(best_model.predict(x_test)==y_test)/y_test.shape[0]}")
+    
+    
+    model_GA = RandomForestClassifier()
+    model_GA.set_params(**best_model.get_params())
+
+    GA_forest = GeneticAlgorithm(x_train, y_train, model_GA, P=P, n_estimators=n_estimators, max_samples=max_samples, cv=cv)
+    GA_result = GA_forest.run(iterations=iterations, mutation_rate=lam, crossover=crossover, 
+                              selection=selection, num_children=num_children, tournament_k=k, 
+                              replace_occurrence=replace_occurrence, replace_amount=replace_amount)
+
+    plt.figure()
+    plt.plot(GA_result.values, ls="-", marker="", label="Generation's Score")
+    plt.plot(GeneticAlgorithm.values_to_optimal_values(GA_result.values), ls="--", marker="", label="Best Score")
+    plt.title("GA Using Random Forest Classifier")
+    plt.ylabel("Accuracy")
+    plt.xlabel("Generation")
+    plt.legend()
+    plt.show()
+    
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    best_model_GA = random_search.best_estimator_
+    best_model_GA.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    predictions = best_model_GA.predict(x_test[:,GA_result.opt_sol.astype(bool)])
+    print(f"It took the GA {GA_result.running_time} seconds to reach a solution")
+    print(f"Selected {np.sum(GA_result.opt_sol)}/{x_train.shape[1]} features")
+    print(f"Hyperparameters for reduced classifier: {best_model_GA.get_params()}")
+    #print(f"Model trained on selected features train score: {best_model_GA.score(x_train[:,GA_result.opt_sol.astype(bool)], y_train)}")
+    print(f"Model trained on selected features train accuracy: {np.sum(best_model_GA.predict(x_train[:,GA_result.opt_sol.astype(bool)])==y_train)/y_train.shape[0]}")
+    #print(f"Model trained on selected features test score: {best_model_GA.score(x_test[:,GA_result.opt_sol.astype(bool)], y_test)}")
+    print(f"Model trained on selected features test accuracy: {np.sum(predictions==y_test)/y_test.shape[0]}")
+    print(f"Got {np.sum(predictions==y_test)} right on test")
+    print(f"Got {y_test.shape[0] - np.sum(predictions==y_test)} wrong on test")
+    
+
+
+run_logistic_regression = False
+if run_logistic_regression:
+    print("\n### Logistic Regression ###")
+
+    max_iter=200
+    model = LogisticRegression(multi_class="multinomial", max_iter=max_iter, solver="saga")
+
+    x_train2 = normalize(x_train, axis=0)
+    x_test2 = normalize(x_test, axis=0)
+
+    param_dist ={
+        "penalty": ["l1", "l2", "elasticnet"],
+        "C": stats.loguniform(1e-4, 1e2),
+        "tol": stats.loguniform(1e-4, 1e-1)
+    }
+    n_iter_search = 15
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train2, y_train)
+    best_model = random_search.best_estimator_
+    best_model.fit(x_train2, y_train)
+
+    print(f"Hyperparameters for base classifier: {best_model.get_params()}")
+    predictions = best_model.predict(x_test2)
+
+    #print(f"Train Score: {best_model.score(x_train2, y_train)}")
+    print(f"Train Accuracy: {np.sum(best_model.predict(x_train2)==y_train)/y_train.shape[0]}")
+    #print(f"Test Score: {best_model.score(x_test2, y_test)}")
+    print(f"Test Accuracy: {np.sum(best_model.predict(x_test2)==y_test)/y_test.shape[0]}")
+    
+    model_GA = LogisticRegression()
+    model_GA.set_params(**best_model.get_params())
+
+    GA_forest = GeneticAlgorithm(x_train, y_train, model_GA, P=P, n_estimators=n_estimators, max_samples=max_samples, cv=cv)
+    GA_result = GA_forest.run(iterations=iterations, mutation_rate=lam, crossover=crossover, 
+                              selection=selection, num_children=num_children, tournament_k=k, 
+                              replace_occurrence=replace_occurrence, replace_amount=replace_amount)
+
+    plt.figure()
+    plt.plot(GA_result.values, ls="-", marker="", label="Generation's Score")
+    plt.plot(GeneticAlgorithm.values_to_optimal_values(GA_result.values), ls="--", marker="", label="Best Score")
+    plt.title("GA Using Multiclass Logistic Regression")
+    plt.ylabel("Accuracy")
+    plt.xlabel("Generation")
+    plt.legend()
+    plt.show()
+    
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train2[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    best_model_GA = random_search.best_estimator_
+    best_model_GA.fit(x_train2[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    predictions = best_model_GA.predict(x_test2[:,GA_result.opt_sol.astype(bool)])
+    print(f"It took the GA {GA_result.running_time} seconds to reach a solution")
+    print(f"Selected {np.sum(GA_result.opt_sol)}/{x_train2.shape[1]} features")
+    print(f"Hyperparameters for reduced classifier: {best_model_GA.get_params()}")
+    #print(f"Model trained on selected features train score: {best_model_GA.score(x_train2[:,GA_result.opt_sol.astype(bool)], y_train)}")
+    print(f"Model trained on selected features train accuracy: {np.sum(best_model_GA.predict(x_train2[:,GA_result.opt_sol.astype(bool)])==y_train)/y_train.shape[0]}")
+    #print(f"Model trained on selected features test score: {best_model_GA.score(x_test2[:,GA_result.opt_sol.astype(bool)], y_test)}")
+    print(f"Model trained on selected features test accuracy: {np.sum([predictions]==y_test)/y_test.shape[0]}")
+    print(f"Got {np.sum(predictions==y_test)} right on test")
+    print(f"Got {y_test.shape[0] - np.sum(predictions==y_test)} wrong on test")
+    
+
+
+run_knn = True
+if run_knn:
+    print("\n### KNN ###")
+
+    model = KNeighborsClassifier()
+    
+    #"n_neighbors": np.arange(3, 7)
+    param_dist ={
+        "n_neighbors": np.arange(3, 4) 
+    }
+    
+    #n_iter_search = 4
+    #random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+    search = GridSearchCV(model, param_grid=param_dist)
+
+    search.fit(x_train, y_train)
+    best_model = search.best_estimator_
+    best_model.fit(x_train, y_train)
+
+    print(f"Hyperparameters for base classifier: {best_model.get_params()}")
+    predictions = best_model.predict(x_test)
+
+    #print(f"Train Score: {best_model.score(x_train, y_train)}")
+    print(f"Train Accuracy: {np.sum(best_model.predict(x_train)==y_train)/y_train.shape[0]}")
+    #print(f"Test Score: {best_model.score(x_test, y_test)}")
+    print(f"Test Accuracy: {np.sum(best_model.predict(x_test)==y_test)/y_test.shape[0]}")
+    
+    model_GA = KNeighborsClassifier()
+    model_GA.set_params(**best_model.get_params())
+
+    GA_forest = GeneticAlgorithm(x_train, y_train, model_GA, P=P, n_estimators=n_estimators, max_samples=max_samples, cv=cv)
+    GA_result = GA_forest.run(iterations=iterations, mutation_rate=lam, crossover=crossover, 
+                              selection=selection, num_children=num_children, tournament_k=k, 
+                              replace_occurrence=replace_occurrence, replace_amount=replace_amount)
+
+    #random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+    search = GridSearchCV(model, param_grid=param_dist)
+
+    search.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    best_model_GA = search.best_estimator_
+    best_model_GA.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+    plt.figure()
+    plt.plot(GA_result.values, ls="-", marker="", label="Generation's Score")
+    plt.plot(GeneticAlgorithm.values_to_optimal_values(GA_result.values), ls="--", marker="", label="Best Score")
+    plt.title(f"GA Using {best_model_GA.get_params()['n_neighbors']}-NN Classifier")
+    plt.ylabel("Accuracy")
+    plt.xlabel("Generation")
+    plt.legend()
+    plt.show()
+    
+
+    predictions = best_model_GA.predict(x_test[:,GA_result.opt_sol.astype(bool)])
+    print(f"It took the GA {GA_result.running_time} seconds to reach a solution")
+    print(f"Selected {np.sum(GA_result.opt_sol)}/{x_train.shape[1]} features")
+    print(f"Hyperparameters for reduced classifier: {best_model_GA.get_params()}")
+    #print(f"Model trained on selected features train score: {best_model_GA.score(x_train[:,GA_result.opt_sol.astype(bool)], y_train)}")
+    print(f"Model trained on selected features train accuracy: {np.sum(best_model_GA.predict(x_train[:,GA_result.opt_sol.astype(bool)])==y_train)/y_train.shape[0]}")
+    #print(f"Model trained on selected features test score: {best_model_GA.score(x_test[:,GA_result.opt_sol.astype(bool)], y_test)}")
+    print(f"Model trained on selected features test accuracy: {np.sum(predictions==y_test)/y_test.shape[0]}")
+    print(f"Got {np.sum(predictions==y_test)} right on test")
+    print(f"Got {y_test.shape[0] - np.sum(predictions==y_test)} wrong on test")
+    
+
+
+
+run_svc = False
+if run_svc:
+    print("\n### SVC ###")
+
+    model = SVC()
+    
+    param_dist ={
+        "C": stats.loguniform(1e-4, 1e2),
+        "kernel": ["linear", "poly", "rbf", "sigmoid"],
+        "degree": np.arange(3,6),
+        "gamma": ["scale", "auto"],
+
+    }
+    n_iter_search = 15
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train, y_train)
+    best_model = random_search.best_estimator_
+    best_model.fit(x_train, y_train)
+
+    print(f"Hyperparameters for base classifier: {best_model.get_params()}")
+    print(f"It took the SVC {best_model.n_iter_} iterations to converge")
+    predictions = best_model.predict(x_test)
+
+    #print(f"Train Score: {best_model.score(x_train, y_train)}")
+    print(f"Train Accuracy: {np.sum(best_model.predict(x_train)==y_train)/y_train.shape[0]}")
+    #print(f"Test Score: {best_model.score(x_test, y_test)}")
+    print(f"Test Accuracy: {np.sum(best_model.predict(x_test)==y_test)/y_test.shape[0]}")
+    
+    model_GA = SVC()
+    model_GA.set_params(**best_model.get_params())
+
+    GA_forest = GeneticAlgorithm(x_train, y_train, model_GA, P=P, n_estimators=n_estimators, max_samples=max_samples, cv=cv)
+    GA_result = GA_forest.run(iterations=iterations, mutation_rate=lam, crossover=crossover, 
+                              selection=selection, num_children=num_children, tournament_k=k, 
+                              replace_occurrence=replace_occurrence, replace_amount=replace_amount)
+
+    plt.figure()
+    plt.plot(GA_result.values, ls="-", marker="", label="Generation's Score")
+    plt.plot(GeneticAlgorithm.values_to_optimal_values(GA_result.values), ls="--", marker="", label="Best Score")
+    plt.title("GA Using SVC")
+    plt.ylabel("Accuracy")
+    plt.xlabel("Generation")
+    plt.legend()
+    plt.show()
+    
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    best_model_GA = random_search.best_estimator_
+    best_model_GA.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    predictions = best_model_GA.predict(x_test[:,GA_result.opt_sol.astype(bool)])
+    print(f"It took the GA {GA_result.running_time} seconds to reach a solution")
+    print(f"Selected {np.sum(GA_result.opt_sol)}/{x_train.shape[1]} features")
+    print(f"Hyperparameters for reduced classifier: {best_model_GA.get_params()}")
+    #print(f"Model trained on selected features train score: {best_model_GA.score(x_train[:,GA_result.opt_sol.astype(bool)], y_train)}")
+    print(f"Model trained on selected features train accuracy: {np.sum(best_model_GA.predict(x_train[:,GA_result.opt_sol.astype(bool)])==y_train)/y_train.shape[0]}")
+    #print(f"Model trained on selected features test score: {best_model_GA.score(x_test[:,GA_result.opt_sol.astype(bool)], y_test)}")
+    print(f"Model trained on selected features test accuracy: {np.sum(predictions==y_test)/y_test.shape[0]}")
+    print(f"Got {np.sum(predictions==y_test)} right on test")
+    print(f"Got {y_test.shape[0] - np.sum(predictions==y_test)} wrong on test")
+    
+
+
+
+run_naive_bayes = False
+if run_naive_bayes:
+    print("\n### Naive Bayes ###")
+
+    model = MultinomialNB(force_alpha=True)
+    
+    param_dist ={
+        "alpha": stats.loguniform(1e-8, 1),
+        "fit_prior": [True, False]
+    }
+
+    n_iter_search = 15
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train, y_train)
+    best_model = random_search.best_estimator_
+    best_model.fit(x_train, y_train)
+
+    print(f"Hyperparameters for base classifier: {best_model.get_params()}")
+    predictions = best_model.predict(x_test)
+
+    #print(f"Train Score: {best_model.score(x_train, y_train)}")
+    print(f"Train Accuracy: {np.sum(best_model.predict(x_train)==y_train)/y_train.shape[0]}")
+    #print(f"Test Score: {best_model.score(x_test, y_test)}")
+    print(f"Test Accuracy: {np.sum(best_model.predict(x_test)==y_test)/y_test.shape[0]}")
+    
+    
+    model_GA = MultinomialNB()
+    model_GA.set_params(**best_model.get_params())
+
+    GA_forest = GeneticAlgorithm(x_train, y_train, model_GA, P=P, n_estimators=n_estimators, max_samples=max_samples, cv=cv)
+    GA_result = GA_forest.run(iterations=iterations, mutation_rate=lam, crossover=crossover, 
+                              selection=selection, num_children=num_children, tournament_k=k, 
+                              replace_occurrence=replace_occurrence, replace_amount=replace_amount)
+
+    plt.figure()
+    plt.plot(GA_result.values, ls="-", marker="", label="Generation's Score")
+    plt.plot(GeneticAlgorithm.values_to_optimal_values(GA_result.values), ls="--", marker="", label="Best Score")
+    plt.title("GA Using Naive Bayes Classifier")
+    plt.ylabel("Accuracy")
+    plt.xlabel("Generation")
+    plt.legend()
+    plt.show()
+    
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist, n_iter=n_iter_search)
+
+    random_search.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    best_model_GA = random_search.best_estimator_
+    best_model_GA.fit(x_train[:,GA_result.opt_sol.astype(bool)], y_train)
+
+    predictions = best_model_GA.predict(x_test[:,GA_result.opt_sol.astype(bool)])
+    print(f"It took the GA {GA_result.running_time} seconds to reach a solution")
+    print(f"Selected {np.sum(GA_result.opt_sol)}/{x_train.shape[1]} features")
+    print(f"Hyperparameters for reduced classifier: {best_model_GA.get_params()}")
+    #print(f"Model trained on selected features train score: {best_model_GA.score(x_train[:,GA_result.opt_sol.astype(bool)], y_train)}")
+    print(f"Model trained on selected features train accuracy: {np.sum(best_model_GA.predict(x_train[:,GA_result.opt_sol.astype(bool)])==y_train)/y_train.shape[0]}")
+    #print(f"Model trained on selected features test score: {best_model_GA.score(x_test[:,GA_result.opt_sol.astype(bool)], y_test)}")
+    print(f"Model trained on selected features test accuracy: {np.sum(predictions==y_test)/y_test.shape[0]}")
+    print(f"Got {np.sum(predictions==y_test)} right on test")
+    print(f"Got {y_test.shape[0] - np.sum(predictions==y_test)} wrong on test")
+    
